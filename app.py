@@ -4,7 +4,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 try:
     from openai import OpenAI
@@ -25,7 +25,7 @@ st.markdown(
     """
     <style>
         .main-header {
-            font-size: 2.2rem;
+            font-size: 2.3rem;
             font-weight: 800;
             color: #0f172a;
             margin-bottom: 0.25rem;
@@ -38,7 +38,7 @@ st.markdown(
             border-radius: 12px;
         }
         div.stButton > button:first-child {
-            background: linear-gradient(90deg, #2563eb, #1d4ed8);
+            background: linear-gradient(90deg, #7c3aed, #2563eb);
             color: white;
             border: none;
             border-radius: 10px;
@@ -47,6 +47,9 @@ st.markdown(
         div.stDownloadButton > button:first-child {
             border-radius: 10px;
             font-weight: 600;
+            background: linear-gradient(90deg, #ec4899, #8b5cf6);
+            color: white;
+            border: none;
         }
     </style>
     """,
@@ -58,10 +61,6 @@ st.markdown(
 # Fonts
 # -----------------------------
 def get_font(size: int, bold: bool = False):
-    """
-    Load a font safely without downloading anything at runtime.
-    Falls back to PIL default if a truetype font is not available.
-    """
     candidates = []
     if bold:
         candidates.extend(
@@ -102,10 +101,7 @@ def get_openai_client():
     elif "OPENAI_API_KEY" in st.session_state and st.session_state["OPENAI_API_KEY"]:
         api_key = st.session_state["OPENAI_API_KEY"]
 
-    if not api_key:
-        return None
-
-    if OpenAI is None:
+    if not api_key or OpenAI is None:
         return None
 
     return OpenAI(api_key=api_key)
@@ -162,19 +158,14 @@ def normalize_logic(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # -----------------------------
-# Text measurement / wrapping
+# Text helpers
 # -----------------------------
 def text_size(draw: ImageDraw.ImageDraw, text: str, font) -> Tuple[int, int]:
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
-def wrap_text_by_width(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font,
-    max_width: int,
-) -> List[str]:
+def wrap_text_by_width(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> List[str]:
     words = text.split()
     if not words:
         return [""]
@@ -195,14 +186,7 @@ def wrap_text_by_width(
     return lines
 
 
-def draw_multiline_centered(
-    draw: ImageDraw.ImageDraw,
-    box: Tuple[int, int, int, int],
-    text: str,
-    font,
-    fill: str,
-    line_spacing: int = 8,
-):
+def draw_multiline_centered(draw, box, text, font, fill, line_spacing=8):
     x1, y1, x2, y2 = box
     max_width = x2 - x1 - 30
     lines = wrap_text_by_width(draw, text, font, max_width)
@@ -219,7 +203,7 @@ def draw_multiline_centered(
 
 
 # -----------------------------
-# AI prompt building
+# AI prompt
 # -----------------------------
 def build_prompt_for_text(text: str) -> str:
     return f"""
@@ -265,10 +249,7 @@ def generate_napkin_logic(input_data: Any, input_type: str = "text") -> Optional
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You convert screenshots or images into clean napkin-style visual summaries. "
-                            "Return JSON only."
-                        ),
+                        "content": "You convert screenshots into colorful napkin-style visual summaries. Return JSON only.",
                     },
                     {
                         "role": "user",
@@ -276,7 +257,7 @@ def generate_napkin_logic(input_data: Any, input_type: str = "text") -> Optional
                             {
                                 "type": "text",
                                 "text": """
-Analyze this image and convert it into a napkin-style visual structure.
+Analyze this image and convert it into a visual structure.
 
 Return ONLY valid JSON:
 {
@@ -298,7 +279,7 @@ Return ONLY valid JSON:
                         ],
                     },
                 ],
-                temperature=0.3,
+                temperature=0.4,
             )
         else:
             response = client.chat.completions.create(
@@ -307,7 +288,7 @@ Return ONLY valid JSON:
                     {"role": "system", "content": "Return JSON only."},
                     {"role": "user", "content": build_prompt_for_text(str(input_data))},
                 ],
-                temperature=0.3,
+                temperature=0.4,
             )
 
         raw = response.choices[0].message.content
@@ -324,97 +305,191 @@ Return ONLY valid JSON:
 
 
 # -----------------------------
-# Canvas creation
+# Attractive color palette
 # -----------------------------
-def create_canvas(width: int = 1400, height: int = 900):
-    image = Image.new("RGB", (width, height), "#fcfcfd")
-    draw = ImageDraw.Draw(image)
+PALETTE = [
+    {"fill": "#FCE7F3", "border": "#EC4899", "text": "#9D174D"},
+    {"fill": "#EDE9FE", "border": "#8B5CF6", "text": "#5B21B6"},
+    {"fill": "#DBEAFE", "border": "#3B82F6", "text": "#1D4ED8"},
+    {"fill": "#CCFBF1", "border": "#14B8A6", "text": "#0F766E"},
+    {"fill": "#FEF3C7", "border": "#F59E0B", "text": "#B45309"},
+    {"fill": "#DCFCE7", "border": "#22C55E", "text": "#15803D"},
+    {"fill": "#FEE2E2", "border": "#EF4444", "text": "#B91C1C"},
+    {"fill": "#E0F2FE", "border": "#0EA5E9", "text": "#0369A1"},
+]
+
+
+# -----------------------------
+# Canvas and shapes
+# -----------------------------
+def create_gradient_background(width: int, height: int) -> Image.Image:
+    bg = Image.new("RGB", (width, height), "#ffffff")
+    draw = ImageDraw.Draw(bg)
+
+    # soft layered bands to simulate a modern presentation background
+    draw.rounded_rectangle([20, 20, width - 20, height - 20], radius=32, fill="#fffdfd")
+    draw.ellipse([-100, -60, 380, 280], fill="#fdf2f8")
+    draw.ellipse([width - 420, -80, width + 40, 260], fill="#eef2ff")
+    draw.ellipse([width - 350, height - 260, width + 80, height + 40], fill="#ecfeff")
+    draw.ellipse([-160, height - 260, 320, height + 80], fill="#fef9c3")
 
     draw.rounded_rectangle(
-        [20, 20, width - 20, height - 20],
-        radius=28,
-        outline="#dbe4f0",
-        width=3,
+        [22, 22, width - 22, height - 22],
+        radius=30,
+        outline="#e2e8f0",
+        width=2,
     )
-    return image, draw
+    return bg
+
+
+def draw_shadowed_card(base_img, box, radius=28, shadow_offset=(10, 10), shadow_blur=12,
+                       fill="#ffffff", border="#cbd5e1", border_width=3):
+    x1, y1, x2, y2 = box
+
+    shadow = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    sx1 = x1 + shadow_offset[0]
+    sy1 = y1 + shadow_offset[1]
+    sx2 = x2 + shadow_offset[0]
+    sy2 = y2 + shadow_offset[1]
+
+    shadow_draw.rounded_rectangle(
+        [sx1, sy1, sx2, sy2],
+        radius=radius,
+        fill=(15, 23, 42, 55),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(shadow_blur))
+    base_img.alpha_composite(shadow)
+
+    overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill, outline=border, width=border_width)
+    base_img.alpha_composite(overlay)
 
 
 # -----------------------------
-# Drawing sections
+# Rendering
 # -----------------------------
-def draw_header(draw: ImageDraw.ImageDraw, logic: Dict[str, Any], width: int):
-    title_font = get_font(44, bold=True)
-    meta_font = get_font(20, bold=False)
+def draw_header(draw, logic, width):
+    title_font = get_font(48, bold=True)
+    category_font = get_font(22, bold=True)
+    subtitle_font = get_font(20, bold=False)
 
     title = logic.get("title", "Untitled Visual")
     category = logic.get("category", "General")
 
-    draw.text((70, 55), title, fill="#0f172a", font=title_font)
-    draw.rounded_rectangle([70, 112, 300, 120], radius=4, fill="#2563eb")
-    draw.text((70, 138), f"Category: {category}", fill="#64748b", font=meta_font)
+    draw.text((70, 52), title, fill="#0f172a", font=title_font)
+
+    # multicolor accent
+    draw.rounded_rectangle([70, 116, 180, 126], radius=5, fill="#ec4899")
+    draw.rounded_rectangle([188, 116, 298, 126], radius=5, fill="#8b5cf6")
+    draw.rounded_rectangle([306, 116, 416, 126], radius=5, fill="#3b82f6")
+
+    # category pill
+    pill_x1, pill_y1, pill_x2, pill_y2 = 70, 145, 250, 185
+    draw.rounded_rectangle([pill_x1, pill_y1, pill_x2, pill_y2], radius=20, fill="#f8fafc", outline="#cbd5e1", width=2)
+    draw.text((pill_x1 + 18, pill_y1 + 8), category, fill="#475569", font=category_font)
+
+    draw.text((280, 152), "AI-generated visual summary", fill="#64748b", font=subtitle_font)
 
 
-def draw_footer(draw: ImageDraw.ImageDraw, logic: Dict[str, Any], width: int, height: int):
+def draw_footer(draw, logic, width, height):
     insight = logic.get("insight", "").strip()
     if not insight:
         return
 
-    footer_font = get_font(24, bold=False)
-    x1, y1, x2, y2 = 70, height - 140, width - 70, height - 60
-    draw.rounded_rectangle([x1, y1, x2, y2], radius=18, fill="#eff6ff", outline="#bfdbfe", width=2)
-    lines = wrap_text_by_width(draw, f"Insight: {insight}", footer_font, (x2 - x1) - 30)
+    title_font = get_font(22, bold=True)
+    body_font = get_font(24, bold=False)
 
-    current_y = y1 + 18
+    x1, y1, x2, y2 = 70, height - 150, width - 70, height - 58
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill="#ffffff", outline="#cbd5e1", width=2)
+
+    # left accent bar
+    draw.rounded_rectangle([x1 + 12, y1 + 12, x1 + 28, y2 - 12], radius=8, fill="#8b5cf6")
+    draw.text((x1 + 45, y1 + 16), "KEY INSIGHT", fill="#7c3aed", font=title_font)
+
+    lines = wrap_text_by_width(draw, insight, body_font, (x2 - x1) - 90)
+    current_y = y1 + 50
     for line in lines[:3]:
-        draw.text((x1 + 20, current_y), line, fill="#1d4ed8", font=footer_font)
-        current_y += 30
+        draw.text((x1 + 45, current_y), line, fill="#334155", font=body_font)
+        current_y += 32
 
 
-def draw_flow_layout(draw: ImageDraw.ImageDraw, nodes: List[str], width: int, height: int):
-    node_font = get_font(26, bold=True)
-    sub_font = get_font(18, bold=False)
+def draw_flow_layout(base_img, draw, nodes, width, height):
+    node_font = get_font(28, bold=True)
+    num_font = get_font(20, bold=True)
 
-    content_top = 240
-    card_h = 220
-    available_w = width - 140
     count = max(1, min(len(nodes), 5))
+    top_y = 270
+    card_h = 250
     gap = 24
+    available_w = width - 150
     card_w = int((available_w - gap * (count - 1)) / count)
-    card_w = max(180, min(card_w, 240))
+    card_w = max(190, min(card_w, 235))
 
-    total_width = card_w * count + gap * (count - 1)
-    start_x = (width - total_width) // 2
-    y = content_top
+    total_w = card_w * count + gap * (count - 1)
+    start_x = (width - total_w) // 2
 
-    for i, node in enumerate(nodes[:count]):
+    for i in range(count):
+        node = nodes[i]
+        colors = PALETTE[i % len(PALETTE)]
+
         x1 = start_x + i * (card_w + gap)
-        y1 = y
+        y1 = top_y
         x2 = x1 + card_w
         y2 = y1 + card_h
 
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill="#ffffff", outline="#2563eb", width=4)
-        draw.rounded_rectangle([x1 + 16, y1 + 16, x1 + 90, y1 + 54], radius=14, fill="#dbeafe")
-        draw.text((x1 + 36, y1 + 24), f"{i+1}", fill="#1d4ed8", font=sub_font)
+        draw_shadowed_card(
+            base_img,
+            [x1, y1, x2, y2],
+            radius=30,
+            fill=colors["fill"],
+            border=colors["border"],
+            border_width=4,
+        )
 
-        draw_multiline_centered(draw, (x1 + 10, y1 + 70, x2 - 10, y2 - 20), node, node_font, "#0f172a")
+        # step circle
+        circle_r = 24
+        cx = x1 + 34
+        cy = y1 + 34
+        draw.ellipse([cx - circle_r, cy - circle_r, cx + circle_r, cy + circle_r], fill=colors["border"])
+        step_text = str(i + 1)
+        tw, th = text_size(draw, step_text, num_font)
+        draw.text((cx - tw // 2, cy - th // 2 - 1), step_text, fill="#ffffff", font=num_font)
 
+        # mini label strip
+        draw.rounded_rectangle([x1 + 70, y1 + 18, x2 - 18, y1 + 52], radius=14, fill="#ffffff")
+        draw.text((x1 + 88, y1 + 24), "STEP", fill=colors["border"], font=num_font)
+
+        draw_multiline_centered(
+            draw,
+            (x1 + 18, y1 + 74, x2 - 18, y2 - 25),
+            node,
+            node_font,
+            colors["text"],
+            line_spacing=10,
+        )
+
+        # connector
         if i < count - 1:
-            arrow_y = y1 + card_h // 2
-            start_arrow = x2 + 8
-            end_arrow = x2 + gap - 8
-            draw.line([start_arrow, arrow_y, end_arrow, arrow_y], fill="#94a3b8", width=5)
+            next_colors = PALETTE[(i + 1) % len(PALETTE)]
+            y_mid = y1 + card_h // 2
+            x_start = x2 + 8
+            x_end = x2 + gap - 8
+
+            draw.line([x_start, y_mid, x_end, y_mid], fill=next_colors["border"], width=6)
             draw.polygon(
                 [
-                    (end_arrow, arrow_y),
-                    (end_arrow - 14, arrow_y - 8),
-                    (end_arrow - 14, arrow_y + 8),
+                    (x_end, y_mid),
+                    (x_end - 14, y_mid - 9),
+                    (x_end - 14, y_mid + 9),
                 ],
-                fill="#94a3b8",
+                fill=next_colors["border"],
             )
 
 
-def draw_grid_layout(draw: ImageDraw.ImageDraw, nodes: List[str], width: int, height: int):
-    node_font = get_font(24, bold=True)
+def draw_grid_layout(base_img, draw, nodes, width, height):
+    node_font = get_font(26, bold=True)
 
     items = nodes[:6]
     count = len(items)
@@ -422,34 +497,58 @@ def draw_grid_layout(draw: ImageDraw.ImageDraw, nodes: List[str], width: int, he
     cols = 2 if count <= 4 else 3
     rows = math.ceil(count / cols)
 
-    grid_top = 230
-    grid_bottom = height - 180
     grid_left = 70
     grid_right = width - 70
+    grid_top = 240
+    grid_bottom = height - 180
 
-    gap_x = 26
-    gap_y = 26
+    gap_x = 24
+    gap_y = 24
+
     card_w = int((grid_right - grid_left - gap_x * (cols - 1)) / cols)
     card_h = int((grid_bottom - grid_top - gap_y * (rows - 1)) / rows)
 
     for idx, node in enumerate(items):
         r = idx // cols
         c = idx % cols
+        colors = PALETTE[idx % len(PALETTE)]
+
         x1 = grid_left + c * (card_w + gap_x)
         y1 = grid_top + r * (card_h + gap_y)
         x2 = x1 + card_w
         y2 = y1 + card_h
 
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill="#ffffff", outline="#60a5fa", width=3)
-        draw_multiline_centered(draw, (x1 + 20, y1 + 20, x2 - 20, y2 - 20), node, node_font, "#0f172a")
+        draw_shadowed_card(
+            base_img,
+            [x1, y1, x2, y2],
+            radius=28,
+            fill=colors["fill"],
+            border=colors["border"],
+            border_width=4,
+        )
+
+        draw.rounded_rectangle([x1 + 18, y1 + 18, x1 + 150, y1 + 54], radius=14, fill="#ffffff")
+        label = f"IDEA {idx+1}"
+        draw.text((x1 + 34, y1 + 24), label, fill=colors["border"], font=get_font(18, bold=True))
+
+        draw_multiline_centered(
+            draw,
+            (x1 + 20, y1 + 70, x2 - 20, y2 - 20),
+            node,
+            node_font,
+            colors["text"],
+            line_spacing=10,
+        )
 
 
 def render_napkin(logic: Dict[str, Any]) -> Optional[Image.Image]:
     if not logic:
         return None
 
-    width, height = 1400, 900
-    image, draw = create_canvas(width, height)
+    width, height = 1450, 920
+
+    bg = create_gradient_background(width, height).convert("RGBA")
+    draw = ImageDraw.Draw(bg)
 
     draw_header(draw, logic, width)
 
@@ -457,13 +556,13 @@ def render_napkin(logic: Dict[str, Any]) -> Optional[Image.Image]:
     layout_type = logic.get("type", "Flow")
 
     if layout_type == "Grid":
-        draw_grid_layout(draw, nodes, width, height)
+        draw_grid_layout(bg, draw, nodes, width, height)
     else:
-        draw_flow_layout(draw, nodes, width, height)
+        draw_flow_layout(bg, draw, nodes, width, height)
 
     draw_footer(draw, logic, width, height)
 
-    return image
+    return bg.convert("RGB")
 
 
 # -----------------------------
@@ -480,17 +579,14 @@ if "OPENAI_API_KEY" not in st.session_state:
 # UI
 # -----------------------------
 st.markdown('<div class="main-header">🎨 Napkin AI Storyteller</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="sub-header">Turn text or screenshots into a clean napkin-style visual summary.</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="sub-header">Turn text or screenshots into a bold, colorful visual summary.</div>', unsafe_allow_html=True)
 
 with st.expander("API key setup", expanded=False):
     st.text_input(
         "OpenAI API Key",
         type="password",
         key="OPENAI_API_KEY",
-        help="If not present in Streamlit secrets, you can paste it here for this session.",
+        help="Paste here if not stored in Streamlit secrets.",
     )
 
 left_col, right_col = st.columns([1.05, 1.45])
@@ -504,16 +600,16 @@ with left_col:
 
     if source == "Text Description":
         input_payload = st.text_area(
-            "Describe the workflow, idea, or business logic",
+            "Describe the workflow, idea, or concept",
             height=220,
-            placeholder="Example: User uploads images, AI classifies them, groups them by category, creates an editable collage, and allows download.",
+            placeholder="Example: Upload images, classify them, group by category, create an attractive collage, edit labels, and download.",
         )
         input_type = "text"
     else:
-        uploaded = st.file_uploader("Upload an image or screenshot", type=["png", "jpg", "jpeg"])
+        uploaded = st.file_uploader("Upload screenshot/image", type=["png", "jpg", "jpeg"])
         if uploaded is not None:
             input_payload = uploaded.getvalue()
-            st.image(input_payload, caption="Uploaded screenshot", use_container_width=True)
+            st.image(input_payload, caption="Uploaded image", use_container_width=True)
         input_type = "image"
 
     c1, c2 = st.columns(2)
@@ -522,7 +618,7 @@ with left_col:
             if not input_payload:
                 st.warning("Please provide input first.")
             else:
-                with st.spinner("Generating napkin logic..."):
+                with st.spinner("Generating colorful visual..."):
                     st.session_state["napkin_data"] = generate_napkin_logic(input_payload, input_type=input_type)
 
     with c2:
@@ -532,22 +628,20 @@ with left_col:
 
     if st.session_state["napkin_data"]:
         st.markdown("---")
-        st.subheader("Edit generated structure")
+        st.subheader("Edit visual content")
 
         data = st.session_state["napkin_data"]
         data["title"] = st.text_input("Title", value=data.get("title", ""))
         data["category"] = st.text_input("Category", value=data.get("category", "General"))
         data["type"] = st.selectbox("Layout", ["Flow", "Grid"], index=0 if data.get("type") == "Flow" else 1)
-        data["insight"] = st.text_area("Insight", value=data.get("insight", ""), height=100)
+        data["insight"] = st.text_area("Insight", value=data.get("insight", ""), height=90)
 
         st.markdown("**Nodes**")
-        nodes = data.get("nodes", [])
         edited_nodes = []
-        for idx, node in enumerate(nodes):
+        for idx, node in enumerate(data.get("nodes", [])):
             edited_nodes.append(st.text_input(f"Node {idx+1}", value=node, key=f"node_{idx}"))
 
-        add_more = st.checkbox("Add one more node")
-        if add_more and len(edited_nodes) < 8:
+        if st.checkbox("Add one more node") and len(edited_nodes) < 8:
             edited_nodes.append(st.text_input("New node", value="", key="new_node"))
 
         data["nodes"] = [n.strip() for n in edited_nodes if n.strip()]
@@ -558,21 +652,21 @@ with right_col:
     current = st.session_state["napkin_data"]
 
     if current:
-        napkin_image = render_napkin(current)
-        if napkin_image is not None:
-            st.image(napkin_image, use_container_width=True)
+        img = render_napkin(current)
+        if img:
+            st.image(img, use_container_width=True)
 
-            output = io.BytesIO()
-            napkin_image.save(output, format="PNG")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
             st.download_button(
                 "Download PNG",
-                data=output.getvalue(),
-                file_name="napkin_ai_visual.png",
+                data=buf.getvalue(),
+                file_name="napkin_colorful_visual.png",
                 mime="image/png",
                 use_container_width=True,
             )
 
-            st.markdown("#### Extracted JSON")
+            st.markdown("#### JSON Structure")
             st.json(current)
     else:
-        st.info("Your napkin-style visual will appear here after generation.")
+        st.info("Your colorful visual will appear here.")
