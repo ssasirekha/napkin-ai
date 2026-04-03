@@ -4,42 +4,60 @@ import base64
 import json
 import os
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageColor
+import math
+from PIL import Image, ImageOps, ImageDraw, ImageFont, ImageColor
 from openai import OpenAI
 
-# --- 1. Cloud Configuration ---
-st.set_page_config(page_title="Napkin Visual AI", layout="wide")
+# --- 1. Cloud & App Configuration ---
+st.set_page_config(page_title="Napkin AI Storyteller", page_icon="🎨", layout="wide")
 
-# Function to safely get the font for Cloud environments
+st.markdown("""
+    <style>
+    .main-header { font-size: 2.2rem; font-weight: 800; color: #1e293b; margin-bottom: 1rem; }
+    div.stButton > button:first-child[kind="primary"] {
+        background-color: #3b82f6;
+        border-color: #3b82f6;
+        color: white;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. Robust Font Loader (Prevents Freetype Errors) ---
 def get_font(size):
     font_url = "https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf"
-    font_path = "Roboto-Bold.ttf"
+    font_path = os.path.join(os.getcwd(), "Roboto-Bold.ttf")
+    
     if not os.path.exists(font_path):
         try:
-            r = requests.get(font_url)
-            with open(font_path, "wb") as f:
-                f.write(r.content)
-        except:
-            return ImageFont.load_default()
-    return ImageFont.truetype(font_path, size)
+            r = requests.get(font_url, timeout=10)
+            if r.status_code == 200:
+                with open(font_path, "wb") as f:
+                    f.write(r.content)
+            else: return ImageFont.load_default()
+        except: return ImageFont.load_default()
+            
+    try:
+        return ImageFont.truetype(font_path, size)
+    except:
+        return ImageFont.load_default()
 
-# --- 2. Hardened AI Architect ---
+# --- 3. High-Precision AI Architect ---
 def get_visual_logic(input_data, input_type="text"):
-    # Ensure key exists in Secrets
     if "OPENAI_API_KEY" not in st.secrets:
-        st.error("Missing OPENAI_API_KEY in Streamlit Secrets!")
+        st.error("Missing OPENAI_API_KEY in Secrets!")
         return None
         
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     
     system_prompt = """
-    You are a Business Visual Storyteller. Analyze the input and determine the best visual.
-    Return ONLY a valid JSON object. Do not include markdown formatting or backticks.
+    You are a Technical Business Strategist. Convert industrial data or screenshots into a visual narrative.
+    Identify the specific 'Image Type' and 'Technical Name' first.
+    Return ONLY a JSON object:
     {
         "type": "ProcessFlow",
-        "title": "Title of Visual",
-        "steps": ["Step 1", "Step 2", "Step 3"],
-        "summary": "Brief insight"
+        "title": "Specific Technical Name (e.g. SCADA Fleet Monitor)",
+        "steps": ["Step 1 Description", "Step 2 Description", "Step 3 Description"],
+        "summary": "Key business insight from this asset"
     }
     Types: 'ProcessFlow', 'KPIBox', or 'Comparison'.
     """
@@ -48,11 +66,11 @@ def get_visual_logic(input_data, input_type="text"):
         if input_type == "image":
             base_img = base64.b64encode(input_data).decode("utf-8")
             content = [
-                {"type": "text", "text": "Extract the core business logic from this image into a visual story structure."},
+                {"type": "text", "text": "Analyze this specific asset. Identify its type and create a visual story structure."},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base_img}", "detail": "high"}}
             ]
         else:
-            content = f"Convert this text into a structured visual story: {input_data}"
+            content = f"Turn this text into a business visual story: {input_data}"
 
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -67,79 +85,92 @@ def get_visual_logic(input_data, input_type="text"):
         st.error(f"AI Logic Error: {e}")
         return None
 
-# --- 3. Rendering Engine ---
+# --- 4. Napkin Rendering Engine ---
 def draw_napkin_visual(logic):
     if not logic: return None
     
-    width, height = 1200, 700
+    width, height = 1200, 750
     img = Image.new("RGB", (width, height), "#FFFFFF")
     draw = ImageDraw.Draw(img)
     
-    f_title = get_font(45)
-    f_step = get_font(28)
-    f_desc = get_font(20)
+    f_title = get_font(48)
+    f_step = get_font(26)
+    f_desc = get_font(22)
 
-    # Header
-    draw.text((60, 50), logic.get("title", "STRATEGY").upper(), fill="#1e293b", font=f_title)
-    draw.rectangle([60, 110, 250, 118], fill="#3b82f6") # Accent bar
+    # Visual Branding
+    draw.text((60, 50), logic.get("title", "ANALYSIS").upper(), fill="#0f172a", font=f_title)
+    draw.rectangle([60, 115, 300, 123], fill="#3b82f6") # Blueprint blue accent
 
     if logic["type"] == "ProcessFlow":
         steps = logic.get("steps", [])
-        for i, step in enumerate(steps[:4]): # Limit to 4 for layout
+        for i, step in enumerate(steps[:4]):
             x = 60 + (i * 280)
-            y = 250
-            # Box
-            draw.rounded_rectangle([x, y, x+240, y+180], radius=20, fill="#f0f9ff", outline="#3b82f6", width=3)
-            # Text wrapping (simple)
-            words = step.split()
-            line1 = " ".join(words[:2])
-            line2 = " ".join(words[2:])
-            draw.text((x+20, y+50), line1, fill="#1e3a8a", font=f_step)
-            draw.text((x+20, y+90), line2, fill="#1e3a8a", font=f_step)
+            y = 260
+            # Technical "Napkin" Box
+            draw.rounded_rectangle([x, y, x+245, y+200], radius=15, fill="#f8fafc", outline="#3b82f6", width=3)
             
+            # Simple text wrap
+            words = step.split()
+            txt_wrap = "\n".join([" ".join(words[i:i+2]) for i in range(0, len(words), 2)])
+            draw.multiline_text((x+25, y+60), txt_wrap, fill="#1e293b", font=f_step, spacing=10)
+            
+            # Flow Arrow
             if i < len(steps) - 1 and i < 3:
-                draw.line([x+250, y+90, x+270, y+90], fill="#cbd5e1", width=4)
+                draw.line([x+255, y+100, x+275, y+100], fill="#94a3b8", width=4)
 
-    # Footer Summary
-    draw.text((60, 600), f"INSIGHT: {logic.get('summary', '')}", fill="#64748b", font=f_desc)
+    elif logic["type"] == "KPIBox":
+        steps = logic.get("steps", [])
+        for i, kpi in enumerate(steps[:3]):
+            x = 60 + (i * 370)
+            draw.rounded_rectangle([x, 200, x+330, 450], radius=25, fill="#eff6ff", outline="#2563eb", width=2)
+            draw.text((x+40, 280), kpi.upper(), fill="#1e40af", font=f_step)
+
+    # Insight Summary Footer
+    draw.rounded_rectangle([60, 620, 1140, 700], radius=10, fill="#f1f5f9")
+    draw.text((80, 645), f"STRATEGIC INSIGHT: {logic.get('summary', '')}", fill="#475569", font=f_desc)
     
     return img
 
-# --- 4. Streamlit App Interface ---
-st.title("🎨 Napkin AI Storyteller")
-st.write("Turn complex industrial data into visual business narratives.")
+# --- 5. Main UI Interface ---
+st.markdown('<p class="main-header">🎨 Napkin AI: Visual Storyteller</p>', unsafe_allow_html=True)
 
 col_input, col_viz = st.columns([1, 2])
 
 with col_input:
-    mode = st.selectbox("Input Mode", ["Analyze Image", "Visualise Text"])
-    data = None
+    st.subheader("📥 Data Source")
+    mode = st.radio("Input Type", ["Analyze Industrial Screenshot", "Describe Process with Text"])
     
-    if mode == "Analyze Image":
-        file = st.file_uploader("Upload Dashboard/Asset", type=['png', 'jpg', 'jpeg'])
+    data = None
+    if mode == "Analyze Industrial Screenshot":
+        file = st.file_uploader("Upload UI/Asset Image", type=['png', 'jpg', 'jpeg'])
         if file:
             data = file.getvalue()
-            st.image(data, width=200)
+            st.image(data, caption="Input Preview", use_container_width=True)
     else:
-        data = st.text_area("What's the story?", placeholder="Describe a workflow or data set...")
+        data = st.text_area("Describe the workflow or metrics...", height=200, placeholder="e.g. The sensor reads temperature, sends it to the cloud gateway, and triggers a cooling fan if above 50C.")
 
-    if st.button("🚀 GENERATE VISUAL", type="primary", use_container_width=True):
+    if st.button("🚀 GENERATE VISUAL STORY", type="primary", use_container_width=True):
         if data:
-            st.session_state["napkin_logic"] = get_visual_logic(data, "image" if mode == "Analyze Image" else "text")
+            with st.spinner("AI analyzing and architecting..."):
+                st.session_state["napkin_logic"] = get_visual_logic(data, "image" if mode == "Analyze Industrial Screenshot" else "text")
         else:
-            st.warning("Please provide input first.")
+            st.warning("Please provide an input first.")
 
 with col_viz:
+    st.subheader("🖼️ Resulting Visual")
     if "napkin_logic" in st.session_state and st.session_state["napkin_logic"]:
         logic = st.session_state["napkin_logic"]
-        with st.spinner("Rendering..."):
-            visual = draw_napkin_visual(logic)
-            if visual:
-                st.image(visual, use_container_width=True)
-                
-                # Download Button
-                buf = io.BytesIO()
-                visual.save(buf, format="PNG")
-                st.download_button("📥 Export for Slides", buf.getvalue(), "napkin_visual.png", "image/png")
+        
+        # Display identified type and name
+        st.success(f"**Identified:** {logic.get('title')}")
+        
+        visual = draw_napkin_visual(logic)
+        if visual:
+            st.image(visual, use_container_width=True)
+            
+            # Download Logic
+            buf = io.BytesIO()
+            visual.save(buf, format="PNG")
+            st.download_button("📥 Export for Presentation", buf.getvalue(), "napkin_story.png", "image/png", use_container_width=True)
     else:
-        st.info("Your visual story will appear here once generated.")
+        st.info("Upload an asset or describe a process to generate a Napkin-style visual story.")
